@@ -4,12 +4,21 @@ import { Messages } from "@/types/messages.types";
 import { useEffect, useState, useRef } from "react";
 import { io, Socket } from "socket.io-client";
 
+interface OnlineUser {
+  id: string;
+  username: string;
+  connectedAt: string;
+}
+
 const ChatPage = () => {
   const [messages, setMessages] = useState<Messages[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [username, setUsername] = useState<string>("Anonymous");
   const [text, setText] = useState<string>("");
+  const [onlineCount, setOnlineCount] = useState<number>(0);
+  const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([]);
+  const [showUserList, setShowUserList] = useState<boolean>(false);
 
   const socketRef = useRef<Socket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -32,10 +41,14 @@ const ChatPage = () => {
     });
 
     socketRef.current = socket;
+
     socket.on("connect", () => {
       console.log("Socket.IO connected");
       setIsConnected(true);
       setError(null);
+
+      // Send user_join event
+      socket.emit("user_join", { username });
     });
 
     socket.on("initial_data", (data: Messages[]) => {
@@ -48,10 +61,19 @@ const ChatPage = () => {
       setMessages((prev) => [...prev, data]);
     });
 
+    socket.on(
+      "users_updated",
+      (data: { count: number; users: OnlineUser[] }) => {
+        console.log("Online users updated:", data.count);
+        setOnlineCount(data.count);
+        setOnlineUsers(data.users);
+      },
+    );
+
     socket.on("disconnect", () => {
       console.log("Socket.IO disconnected");
       setIsConnected(false);
-      setError("connection lost");
+      setError("Connection lost");
     });
 
     socket.on("connect_error", (error: Error) => {
@@ -67,16 +89,17 @@ const ChatPage = () => {
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [username]);
 
   useEffect(() => {
-    function askUsername() {
-      const dialog = prompt("What is your username");
-      if (!dialog) askUsername();
-      setUsername(dialog!);
+    function getUsername() {
+      const name = prompt("What is your username: ");
+      if (!name) getUsername();
+
+      setUsername(name!);
     }
 
-    askUsername();
+    getUsername();
   }, []);
 
   const handleNewMessage = (e: React.FormEvent) => {
@@ -99,26 +122,98 @@ const ChatPage = () => {
 
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return date.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-linenar-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 px-4 py-8">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 px-4 py-8">
       <div className="w-full max-w-2xl flex flex-col h-[90vh]">
         {/* Header */}
         <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 px-6 py-4 shadow-sm rounded-t-lg">
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-            Chat Room
-          </h1>
-          <div className="flex items-center gap-2 mt-2">
-            <div
-              className={`w-3 h-3 rounded-full ${
-                isConnected ? "bg-green-500" : "bg-red-500"
-              }`}
-            />
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              {isConnected ? "Connected" : "Disconnected"}
-            </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+                Chat Room
+              </h1>
+              <div className="flex items-center gap-2 mt-2">
+                <div
+                  className={`w-3 h-3 rounded-full ${
+                    isConnected ? "bg-green-500" : "bg-red-500"
+                  }`}
+                />
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  {isConnected ? "Connected" : "Disconnected"}
+                </p>
+              </div>
+            </div>
+
+            {/* Online Users Counter */}
+            <div className="relative">
+              <button
+                onClick={() => setShowUserList(!showUserList)}
+                className="flex items-center gap-2 bg-blue-100 dark:bg-blue-900/30 hover:bg-blue-200 dark:hover:bg-blue-900/50 px-4 py-2 rounded-lg transition-colors"
+              >
+                <svg
+                  className="w-5 h-5 text-blue-600 dark:text-blue-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                  />
+                </svg>
+                <span className="font-semibold text-blue-600 dark:text-blue-400">
+                  {onlineCount} Online
+                </span>
+              </button>
+
+              {/* Online Users Dropdown */}
+              {showUserList && (
+                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-10 max-h-96 overflow-y-auto">
+                  <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+                    <h3 className="font-semibold text-slate-900 dark:text-white">
+                      Online Users ({onlineCount})
+                    </h3>
+                  </div>
+                  <div className="py-2">
+                    {onlineUsers.length === 0 ? (
+                      <p className="px-4 py-2 text-sm text-slate-500 dark:text-slate-400">
+                        No users online
+                      </p>
+                    ) : (
+                      onlineUsers.map((user) => (
+                        <div
+                          key={user.id}
+                          className="px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/50 flex items-center gap-3"
+                        >
+                          <div className="w-8 h-8 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center flex-shrink-0">
+                            <span className="text-white font-semibold text-sm">
+                              {user.username.charAt(0).toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-900 dark:text-white truncate">
+                              {user.username}
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              {formatTime(user.connectedAt)}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

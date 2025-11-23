@@ -26,6 +26,14 @@ const dataStore: Messages[] = [
   },
 ];
 
+interface OnlineUser {
+  id: string;
+  username: string;
+  connectedAt: string;
+}
+
+const onlineUsers: Map<string, OnlineUser> = new Map();
+
 app.prepare().then(() => {
   const server = createServer((req, res) => {
     const parsedUrl = parse(req.url || "", true);
@@ -46,6 +54,24 @@ app.prepare().then(() => {
 
     // Send initial data
     socket.emit("initial_data", dataStore);
+
+    // Handle user joining
+    socket.on("user_join", (data: { username: string }) => {
+      const user: OnlineUser = {
+        id: socket.id,
+        username: data.username || "Anonymous",
+        connectedAt: new Date().toISOString(),
+      };
+      onlineUsers.set(socket.id, user);
+
+      // Broadcast updated user list to all clients
+      io.emit("users_updated", {
+        count: onlineUsers.size,
+        users: Array.from(onlineUsers.values()),
+      });
+
+      console.log(`User joined: ${user.username} (${socket.id})`);
+    });
 
     // Handle add_item
     socket.on("add_item", (data: { content: string; author: string }) => {
@@ -84,6 +110,20 @@ app.prepare().then(() => {
 
     socket.on("disconnect", () => {
       console.log(`Client disconnected: ${socket.id}`);
+
+      // Remove user from online users
+      const user = onlineUsers.get(socket.id);
+      if (user) {
+        onlineUsers.delete(socket.id);
+
+        // Broadcast updated user list to all clients
+        io.emit("users_updated", {
+          count: onlineUsers.size,
+          users: Array.from(onlineUsers.values()),
+        });
+
+        console.log(`User left: ${user.username} (${socket.id})`);
+      }
     });
 
     socket.on("error", (error) => {
